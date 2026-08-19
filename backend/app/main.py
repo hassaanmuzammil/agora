@@ -5,12 +5,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api import feedback
 from backend.app.api import auth, files, groups, threads
+from backend.app.api.files import ensure_bucket
 
 
 app = FastAPI(
     title="Chat API",
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    ensure_bucket()
 
 app.add_middleware(
     CORSMiddleware,

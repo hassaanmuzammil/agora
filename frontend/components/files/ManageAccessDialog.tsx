@@ -13,6 +13,7 @@ interface ManageAccessDialogProps {
 
 export function ManageAccessDialog({ file, onSave, onClose }: ManageAccessDialogProps) {
   const [groups, setGroups] = useState<Group[]>([]);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
   // Derived directly from the (remounted-per-file, see `key` at the call
   // site) initial render rather than synced via effect — avoids a
   // setState-in-effect render cascade for state that's really just a copy
@@ -20,9 +21,20 @@ export function ManageAccessDialog({ file, onSave, onClose }: ManageAccessDialog
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(() => file?.groups.map((g) => g.id) ?? []);
   const [isSaving, setIsSaving] = useState(false);
 
+  const [newGroupName, setNewGroupName] = useState("");
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const [createGroupError, setCreateGroupError] = useState<string | null>(null);
+
   useEffect(() => {
     if (file) {
-      groupsService.list().then(setGroups).catch(() => setGroups([]));
+      setGroupsError(null);
+      groupsService
+        .list()
+        .then(setGroups)
+        .catch(() => {
+          setGroups([]);
+          setGroupsError("Couldn't load groups. Try again.");
+        });
     }
   }, [file]);
 
@@ -32,6 +44,24 @@ export function ManageAccessDialog({ file, onSave, onClose }: ManageAccessDialog
     setSelectedGroupIds((prev) =>
       prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId],
     );
+  }
+
+  async function handleCreateGroup() {
+    const name = newGroupName.trim();
+    if (!name) return;
+
+    setIsCreatingGroup(true);
+    setCreateGroupError(null);
+    try {
+      const group = await groupsService.create({ name });
+      setGroups((prev) => [...prev, group]);
+      setSelectedGroupIds((prev) => [...prev, group.id]);
+      setNewGroupName("");
+    } catch {
+      setCreateGroupError("Couldn't create group. Try again.");
+    } finally {
+      setIsCreatingGroup(false);
+    }
   }
 
   async function handleSave() {
@@ -53,7 +83,9 @@ export function ManageAccessDialog({ file, onSave, onClose }: ManageAccessDialog
         <h2 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Manage access</h2>
         <p className="mb-3 truncate text-xs text-[var(--text-secondary)]">{file.name}</p>
 
-        {groups.length === 0 ? (
+        {groupsError && <p className="mb-2 text-xs text-[var(--danger)]">{groupsError}</p>}
+
+        {groups.length === 0 && !groupsError ? (
           <p className="mb-3 text-sm text-[var(--text-tertiary)]">No groups exist yet.</p>
         ) : (
           <div className="mb-3 space-y-1.5">
@@ -69,6 +101,34 @@ export function ManageAccessDialog({ file, onSave, onClose }: ManageAccessDialog
             ))}
           </div>
         )}
+
+        <div className="mb-3 border-t border-[var(--border)] pt-3">
+          <p className="mb-1.5 text-xs font-medium text-[var(--text-secondary)]">Create a new group</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleCreateGroup();
+                }
+              }}
+              placeholder="Group name"
+              disabled={isCreatingGroup}
+              className="w-full rounded-md border border-[var(--border)] bg-white px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]"
+            />
+            <button
+              onClick={handleCreateGroup}
+              disabled={!newGroupName.trim() || isCreatingGroup}
+              className="shrink-0 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:opacity-40"
+            >
+              {isCreatingGroup ? "Creating…" : "Create"}
+            </button>
+          </div>
+          {createGroupError && <p className="mt-1.5 text-xs text-[var(--danger)]">{createGroupError}</p>}
+        </div>
 
         <div className="flex justify-end gap-2">
           <button

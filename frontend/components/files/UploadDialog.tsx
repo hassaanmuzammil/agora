@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { groupsService } from "@/services/groups";
 import type { Group } from "@/services/groups";
+import { ApiError } from "@/services/api";
 
 interface UploadDialogProps {
   open: boolean;
@@ -32,6 +33,16 @@ export function UploadDialog({ open, isUploading, onUpload, onClose }: UploadDia
     );
   }
 
+  function handleFileChange(file: File | null) {
+    if (file && !file.name.toLowerCase().endsWith(".pdf")) {
+      setError("Only PDF files are supported.");
+      setSelectedFile(null);
+      return;
+    }
+    setError(null);
+    setSelectedFile(file);
+  }
+
   async function handleUpload() {
     if (!selectedFile) return;
     setError(null);
@@ -40,8 +51,8 @@ export function UploadDialog({ open, isUploading, onUpload, onClose }: UploadDia
       setSelectedFile(null);
       setSelectedGroupIds([]);
       onClose();
-    } catch {
-      setError("Upload failed. Try again.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Upload failed. Try again.");
     }
   }
 
@@ -62,8 +73,9 @@ export function UploadDialog({ open, isUploading, onUpload, onClose }: UploadDia
         <input
           ref={inputRef}
           type="file"
+          accept=".pdf"
           className="hidden"
-          onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+          onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
         />
 
         {groups.length > 0 && (
