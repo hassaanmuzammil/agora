@@ -10,82 +10,17 @@ https://github.com/user-attachments/assets/1d2e4f18-5e2e-4668-8337-faa976c88bc3
 
 ## Table of Contents
 
+- [Features](#features)
 - [Architecture](#architecture)
 - [How a Chat Message Actually Works](#how-a-chat-message-actually-works)
-- [Features](#features)
+- [RAG Pipeline Deep Dive](#rag-pipeline-deep-dive)
+- [Access Control](#access-control)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
 - [Demo Accounts](#demo-accounts)
-- [Access Control](#access-control)
-- [RAG Pipeline Deep Dive](#rag-pipeline-deep-dive)
 - [API Reference](#api-reference)
 - [Known Limitations / Roadmap](#known-limitations--roadmap)
-- [Demo](#demo)
-
-## Architecture
-
-```mermaid
-flowchart TB
-    subgraph Client
-        Browser["Browser<br/>React 19 + Next.js 16"]
-    end
-
-    subgraph Application
-        BE["Backend API<br/>FastAPI"]
-    end
-
-    subgraph DataLayer["Data Layer"]
-        PG[("Postgres<br/>users · threads · messages<br/>files · groups")]
-        MinIO[("MinIO<br/>raw PDF blobs")]
-        Qdrant[("Qdrant<br/>vector embeddings")]
-    end
-
-    subgraph External["External Services"]
-        OpenAI["OpenAI API<br/>query rewrite + chat completion"]
-    end
-
-    Browser -->|"REST + Server-Sent Events<br/>(Bearer token auth)"| BE
-    BE --> PG
-    BE --> MinIO
-    BE --> Qdrant
-    BE --> OpenAI
-```
-
-The frontend never talks to Postgres, MinIO, Qdrant, or OpenAI directly — every request goes through the FastAPI backend, which is the only service holding credentials for the data layer and the only service that enforces access control before any retrieval happens.
-
-## How a Chat Message Actually Works
-
-Every message you send goes through a small pipeline, not a single LLM call:
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant BE as Backend
-    participant R as OpenAI (rewrite step)
-    participant Q as Qdrant
-    participant A as OpenAI (answer step)
-
-    U->>BE: "What is smothquant?"
-    BE->>R: rewrite(question, last 5 turns of history)
-    R-->>BE: search_query + clarified_question<br/>(or a rejection, for greetings/small talk)
-
-    alt genuine attempt at a question
-        BE->>Q: vector search using search_query
-        Q-->>BE: top candidates
-        BE->>BE: rerank to top 3, expand ±1 neighbor chunk
-        BE->>A: clarified_question + retrieved chunks<br/>(temperature = 0)
-        A-->>BE: streamed, cited answer
-        BE-->>U: SSE: sources panel, then answer tokens
-    else greeting, small talk, or incoherent
-        BE-->>U: SSE: friendly reply, no retrieval performed
-    end
-```
-
-Two design decisions here are the product of real bugs found and fixed during this project (see [RAG Pipeline Deep Dive](#rag-pipeline-deep-dive) for the full story):
-
-1. **The rewrite step produces two different outputs, not one.** `search_query` is allowed to be loose and expansive — it's only used for finding candidate chunks. `clarified_question` must stay faithful to exactly what you asked, just with pronouns resolved and typos fixed — it's what the final-answer model actually sees, so it can't quietly broaden your question into something the retrieved content doesn't cover.
-2. **The rewrite step's only job is "is this a real question," not "do we have an answer."** A well-formed question about something the corpus has zero content on (e.g. asking about photosynthesis when only ML papers are uploaded) is expected to pass this step — the honest "I don't have this" call is made later, by the answer step actually reading what got retrieved.
 
 ## Features
 
@@ -96,6 +31,58 @@ Two design decisions here are the product of real bugs found and fixed during th
 - **Role-based access control** — admin vs. regular user roles, plus group-based file sharing; a file can be scoped to specific groups instead of being fully private or fully public, enforced at the retrieval layer, not just the file list
 - **Groups admin UI** — create groups and manage membership entirely from the UI, no API calls required
 - **Feedback** — thumbs up/down on individual answers, stored per message
+
+## Architecture
+
+![Architecture diagram: Browser talks to the FastAPI backend over REST and Server-Sent Events; the backend is the only service that talks to Postgres, MinIO, Qdrant, and the OpenAI API](assets/architecture.png)
+
+The frontend never talks to Postgres, MinIO, Qdrant, or OpenAI directly — every request goes through the FastAPI backend, which is the only service holding credentials for the data layer and the only service that enforces access control before any retrieval happens.
+
+## How a Chat Message Actually Works
+
+Every message you send goes through a small pipeline, not a single LLM call:
+
+![Sequence diagram: user message goes to the backend, which calls OpenAI to rewrite the query, then either searches Qdrant, reranks, expands neighbor chunks, and calls OpenAI again for a cited answer, or replies directly for greetings and small talk](assets/chat-sequence.png)
+
+The rewrite, retrieval, rerank, and context-expansion steps above are each covered in detail in [RAG Pipeline Deep Dive](#rag-pipeline-deep-dive).
+
+## RAG Pipeline Deep Dive
+
+This section documents the retrieval and generation design behind the app. Every message passes through four distinct stages before an answer is generated:
+
+![RAG pipeline diagram: User Question flows through Query Rewrite, Hybrid Retrieval (dense embeddings + sparse BM25), Rerank, and Neighbor Expansion, into Answer Generation, producing a Cited Answer](assets/rag-pipeline.png)
+
+**1. Query rewrite** — one LLM call, two separate outputs:
+- `search_query` — used only for the vector search below; allowed to be loose/expansive since a slightly-too-broad search just adds a few extra candidates
+- `clarified_question` — used only for the final-answer step; must preserve the exact scope of the original question (no added sub-questions, no guessed domains) while resolving pronouns and fixing typos, since the final-answer step never sees conversation history directly — this field is its only chance to understand what "it" or "that" referred to
+- A misspelled or unfamiliar term is explicitly *not* treated as grounds for rejecting a question — only genuine non-questions (greetings, small talk, harmful requests, true gibberish) get rejected before retrieval runs
+
+**2. Hybrid retrieval** — combines two different search signals against Qdrant instead of relying on one, an approach generally called **Hybrid RAG**:
+- **Dense retrieval** (`all-MiniLM-L6-v2` embeddings) finds chunks that are *semantically* similar to the query — text that means the same thing even when it uses different words
+- **Sparse retrieval** (`Qdrant/bm25`, a keyword-based ranking algorithm) finds chunks with *exact* term matches — important for exact strings a corpus uses, like a product name or acronym, that an embedding model alone might not rank highly enough
+- Both searches run against Qdrant and their results are merged, so a query is covered by two different notions of relevance instead of betting entirely on embedding similarity
+- The top 20 combined candidates (`RETRIEVE_K`) are passed on to reranking, not used directly
+
+**3. Rerank step** — a dedicated cross-encoder narrows candidates before anything reaches the LLM:
+- A `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker scores each of the 20 retrieved candidates against the query and keeps only the top 3 (`RERANK_TOP_N`)
+- This exists because embedding similarity (a bi-encoder, used for the initial retrieval) and true relevance (a cross-encoder, which sees the query and chunk together) are different things — the initial 20 are a fast, approximate net; the reranker is the accurate second pass that decides what the model actually sees
+
+**4. Neighbor search / context expansion** — the reranked top 3 chunks are not sent to the LLM as-is:
+- Each of the 3 chunks gets its immediate neighbor (±1, by original document position) pulled back in from Postgres via `docstore.py`, so a chunk that got cut off mid-sentence at the chunking boundary isn't missing its conclusion
+- Because this can pull in tangential neighbor content alongside the genuinely relevant chunk, the final-answer prompt (below) is written to tolerate partial relevance rather than reject the whole context outright
+
+**Answer generation:**
+- `temperature` is fixed at `0` on both OpenAI calls, so retrieval-grounded answers stay deterministic and reproducible across identical requests rather than varying between runs
+- The final-answer prompt explicitly permits partial relevance: the model is instructed to use whichever retrieved chunks are relevant and ignore the rest, and to refuse only when *none* of the context relates to the question at all — this keeps neighbor-expanded context (which can include tangential chunks such as benchmarks or references) from tipping the model into an unnecessary refusal
+
+There is currently no caching layer in the pipeline (no query cache, no embedding cache) — every message re-runs the full rewrite → retrieve → rerank → expand → generate sequence. That's a deliberate scope boundary for now, not an oversight; see [Roadmap](#known-limitations--roadmap).
+
+## Access Control
+
+- **Admin** gets a "Groups" tab (hidden for regular users) to create groups, add/remove members, and control which groups a file is shared with from the Files page.
+- **Regular users** can only see and query files they uploaded, or files shared with a group they belong to.
+- Access is enforced at the retrieval layer, not just the file list — a user without access to a file cannot pull answers from its content either, since the Qdrant search itself is filtered by the caller's allowed file set before anything is retrieved.
+- Creating a user account is currently a backend/script task (see above), not a UI flow — this is a scoped decision for now, not an oversight (see [Roadmap](#known-limitations--roadmap)).
 
 ## Tech Stack
 
@@ -243,31 +230,6 @@ For local evaluation, these two accounts are commonly seeded:
 | `admin@example.com` | `password123` | Admin |
 | `user@example.com` | `password123` | Regular user |
 
-## Access Control
-
-- **Admin** gets a "Groups" tab (hidden for regular users) to create groups, add/remove members, and control which groups a file is shared with from the Files page.
-- **Regular users** can only see and query files they uploaded, or files shared with a group they belong to.
-- Access is enforced at the retrieval layer, not just the file list — a user without access to a file cannot pull answers from its content either, since the Qdrant search itself is filtered by the caller's allowed file set before anything is retrieved.
-- Creating a user account is currently a backend/script task (see above), not a UI flow — this is a scoped decision for now, not an oversight (see [Roadmap](#known-limitations--roadmap)).
-
-## RAG Pipeline Deep Dive
-
-This section documents the actual retrieval/generation tuning behind the app — these are real, tested design decisions, not defaults left untouched.
-
-**Retrieval:**
-- Hybrid dense + sparse search: `all-MiniLM-L6-v2` dense embeddings combined with `Qdrant/bm25` sparse vectors, so both semantic similarity and exact keyword matches contribute to candidate selection
-- Top 20 candidates (`RETRIEVE_K`) are pulled from Qdrant, then narrowed to the top 3 (`RERANK_TOP_N`) by a `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker
-- Each of those 3 chunks gets its immediate neighbor (±1) pulled in for continuity, so a chunk cut off mid-sentence isn't missing its conclusion
-
-**Query understanding (two outputs from one LLM call, not one):**
-- `search_query` — used only for the Qdrant search above; allowed to be loose/expansive since a slightly-too-broad search just adds a few extra candidates
-- `clarified_question` — used only for the final-answer step; must preserve the exact scope of the original question (no added sub-questions, no guessed domains) while resolving pronouns and fixing typos, since the final-answer step never sees conversation history directly — this field is its only chance to understand what "it" or "that" referred to
-- A misspelled or unfamiliar term is explicitly *not* treated as grounds for rejecting a question — only genuine non-questions (greetings, small talk, harmful requests, true gibberish) get rejected before retrieval
-
-**Answer generation:**
-- `temperature=0` on both OpenAI calls — verified via repeated identical-prompt testing that the default (unset) temperature caused the same prompt to sometimes answer and sometimes falsely refuse; determinism removes that as a variable entirely
-- The final-answer prompt explicitly tells the model to use whichever retrieved chunks are relevant and ignore the rest, only refusing if *none* of the context relates to the question at all — without this, a good 3-chunk retrieval diluted by tangential neighbor chunks (e.g. benchmarks, references) could tip the model into refusing to answer even when a clearly relevant chunk was sitting right there in the context
-
 ## API Reference
 
 Full interactive documentation (request/response schemas, try-it-out) is available at `http://localhost:8000/docs` once the backend is running. High-level endpoint groups:
@@ -286,5 +248,5 @@ Full interactive documentation (request/response schemas, try-it-out) is availab
 - No admin UI for creating users or promoting/demoting admins — this is a database/script-level action today (group creation and membership do have a UI, under "Groups").
 - Only one file type is supported for upload: PDF.
 - No rate limiting on chat requests — be mindful of this if exposing an instance publicly with a real API key.
+- No caching layer (query or embedding) — every request re-runs the full pipeline.
 - Not yet deployed to a public host — local Docker Compose only, for now.
-
