@@ -2,6 +2,10 @@
 
 Agora is a self-hosted RAG (Retrieval-Augmented Generation) chat application. Upload PDF documents, ask questions about them in natural language, and get answers grounded in the actual document content — with inline citations back to the source file and page, role-based access control over who can see what, and a multi-stage query pipeline built to resist hallucination and false refusals.
 
+## Demo
+
+https://github.com/user-attachments/assets/1d2e4f18-5e2e-4668-8337-faa976c88bc3
+
 > 📖 **Auto-generated deep-dive docs:** [deepwiki.com/hassaanmuzammil/agora](https://deepwiki.com/hassaanmuzammil/agora)
 
 ## Table of Contents
@@ -284,6 +288,3 @@ Full interactive documentation (request/response schemas, try-it-out) is availab
 - No rate limiting on chat requests — be mindful of this if exposing an instance publicly with a real API key.
 - Not yet deployed to a public host — local Docker Compose only, for now.
 
-## Demo
-
-<!-- Demo video/GIF goes here -->
