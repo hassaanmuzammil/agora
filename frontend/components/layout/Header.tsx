@@ -30,7 +30,7 @@ export function Header({ user, onLogout }: HeaderProps) {
           <Image src="/logo.jpg" alt="Agora" width={22} height={22} className="rounded-sm" />
           Agora
         </span>
-        <Navigation />
+        <Navigation isAdmin={user?.is_admin ?? false} />
       </div>
 
       <div className="relative">

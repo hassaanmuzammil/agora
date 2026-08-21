@@ -94,6 +94,19 @@ async def upload_file(
             detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
+    existing = await db.execute(
+        select(FileModel).where(
+            FileModel.filename == file.filename,
+            FileModel.user_id == user.id,
+            FileModel.deleted_at.is_(None),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="You already uploaded a file with this name.",
+        )
+
     content = await file.read()
 
 
@@ -114,6 +127,7 @@ async def upload_file(
         )
 
     except S3Error as e:
+        logger.error(f"MinIO upload failed for {object_name}: {e}")
 
         raise HTTPException(
             status_code=500,

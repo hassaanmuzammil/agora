@@ -11,6 +11,12 @@ dependencies = [
     "email-validator>=2.3.0",
     "fastapi>=0.139.2",
     "fastembed==0.7.1",
+    # Required by SQLAlchemy's async engine. Normally pulled in
+    # transitively, but the lockfile's platform marker for it lists
+    # "aarch64" (Linux ARM64) without "arm64" (what macOS reports on
+    # Apple Silicon) — that mismatch silently skips installing it there.
+    # Declared directly so it's always installed regardless of platform.
+    "greenlet>=3.0.0",
     "huggingface-hub==0.34.4",
     "langchain==0.3.27",
     "langchain-community==0.3.27",

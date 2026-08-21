@@ -21,7 +21,7 @@ export interface RagSource {
 }
 
 export interface IntermediateSteps {
-  rewritten_query: string | null;
+  clarified_question: string | null;
   rejected: boolean;
   rejection_reason: string | null;
   sources: RagSource[];

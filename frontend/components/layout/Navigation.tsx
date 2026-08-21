@@ -6,14 +6,19 @@ import { usePathname } from "next/navigation";
 const NAV_ITEMS = [
   { href: "/", label: "Chat", match: (path: string) => path === "/" || path.startsWith("/thread") },
   { href: "/files", label: "Files", match: (path: string) => path.startsWith("/files") },
+  { href: "/groups", label: "Groups", match: (path: string) => path.startsWith("/groups"), adminOnly: true },
 ];
 
-export function Navigation() {
+interface NavigationProps {
+  isAdmin: boolean;
+}
+
+export function Navigation({ isAdmin }: NavigationProps) {
   const pathname = usePathname();
 
   return (
     <nav className="flex items-center gap-1">
-      {NAV_ITEMS.map((item) => {
+      {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => {
         const active = item.match(pathname);
         return (
           <Link

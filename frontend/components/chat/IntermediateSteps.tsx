@@ -44,7 +44,7 @@ export function IntermediateSteps({ steps, onSourceClick }: IntermediateStepsPro
 
   const summary = steps.rejected
     ? "Query not answerable from documents"
-    : `Rewrote query · ${sourceCount} source${sourceCount === 1 ? "" : "s"} retrieved`;
+    : `${sourceCount} source${sourceCount === 1 ? "" : "s"} retrieved`;
 
   return (
     <div className="w-full max-w-2xl self-start rounded-lg border border-[var(--border)] bg-[var(--surface)] text-xs">
@@ -59,11 +59,11 @@ export function IntermediateSteps({ steps, onSourceClick }: IntermediateStepsPro
       {open && (
         <div className="space-y-3 border-t border-[var(--border)] px-3 py-2.5">
           <div>
-            <p className="mb-1 font-semibold text-[var(--text-secondary)]">Query rewrite</p>
+            <p className="mb-1 font-semibold text-[var(--text-secondary)]">Question</p>
             {steps.rejected ? (
               <p className="text-[var(--text-tertiary)]">{steps.rejection_reason}</p>
             ) : (
-              <p className="font-mono text-[var(--text-primary)]">{steps.rewritten_query}</p>
+              <p className="font-mono text-[var(--text-primary)]">{steps.clarified_question}</p>
             )}
           </div>
 

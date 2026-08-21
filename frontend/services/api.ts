@@ -41,7 +41,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
     try {
       const body = await res.json();
-      message = body.message || message;
+      // FastAPI's HTTPException serializes as {"detail": "..."}, not
+      // {"message": "..."} — check detail first so route-specific error
+      // text (e.g. "You already uploaded a file with this name.") actually
+      // reaches the UI instead of silently falling back to a generic
+      // HTTP status phrase.
+      message = body.detail || body.message || message;
     } catch {
       // ignore parse failure
     }
@@ -74,7 +79,7 @@ export async function streamPost(path: string, body: unknown, signal?: AbortSign
 
     try {
       const clone = await res.json();
-      message = clone.message || message;
+      message = clone.detail || clone.message || message;
     } catch {
       // ignore parse failure
     }

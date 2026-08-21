@@ -396,26 +396,26 @@ async def send_message(
                 yield sse("error", {"message": "OpenAI API key is not configured."})
             else:
                 try:
-                    rewritten_query, fallback_message = await query_rewrite(
+                    search_query, clarified_question, fallback_message = await query_rewrite(
                         message=user_message.content,
                         chat_history=chat_history,
                     )
 
                     intermediate_steps = {
-                        "rewritten_query": rewritten_query,
-                        "rejected": not bool(rewritten_query),
-                        "rejection_reason": fallback_message if not rewritten_query else None,
+                        "clarified_question": clarified_question,
+                        "rejected": not bool(search_query),
+                        "rejection_reason": fallback_message if not search_query else None,
                         "sources": [],
                     }
 
-                    if not rewritten_query:
+                    if not search_query:
                         yield sse("intermediate_steps", intermediate_steps)
                         accumulated = fallback_message
                         yield sse("delta", {"content": fallback_message})
                     else:
                         allowed_sources = await resolve_allowed_sources(db, user)
                         sources = await pipeline.retrieve(
-                            rewritten_query,
+                            search_query,
                             expand_context=True,
                             allowed_sources=allowed_sources,
                         )
@@ -425,11 +425,12 @@ async def send_message(
                         yield sse("intermediate_steps", intermediate_steps)
 
                         context = build_context(sources)
-                        prompt = FINAL_ANSWER_TEMPLATE.format(context=context, message=rewritten_query)
+                        prompt = FINAL_ANSWER_TEMPLATE.format(context=context, message=clarified_question)
 
                         stream = await openai_client.chat.completions.create(
                             model=settings.OPENAI_MODEL,
                             messages=[{"role": "user", "content": prompt}],
+                            temperature=0,
                             stream=True,
                         )
 
