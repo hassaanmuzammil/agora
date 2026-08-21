@@ -213,10 +213,10 @@ There's no self-service sign-up — accounts are provisioned directly:
 
 ```bash
 # Docker path
-docker exec agora-backend python -m backend.scripts.create_user --email admin@example.com --password yourpassword --admin
+docker exec agora-backend python -m backend.scripts.create_user --email admin@example.com --password password123 --admin
 
 # Native path (from repo root, using the backend venv)
-backend/.venv/bin/python -m backend.scripts.create_user --email admin@example.com --password yourpassword --admin
+backend/.venv/bin/python -m backend.scripts.create_user --email admin@example.com --password password123 --admin
 ```
 
 Omit `--admin` for a regular user, and re-run with different `--email`/`--password` for additional accounts.
